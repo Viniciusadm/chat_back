@@ -146,15 +146,16 @@ fn validate_message_payload(req: &MessageRequest) -> AppResult<()> {
         "text" if req.ciphertext.is_some() && req.iv.is_some() && req.enc_version.is_some() => {
             Ok(())
         }
-        "audio" if req.audio_url.is_some() && req.audio_duration.is_some() => Ok(()),
+        "audio" => Ok(()),
         "image"
             if req.image_url.is_some()
-                && req.image_width.is_some()
-                && req.image_height.is_some() =>
+                || (req.image_width.is_none()
+                    && req.image_height.is_none()
+                    && req.image_file_size.is_none()) =>
         {
             Ok(())
         }
-        "text" | "audio" | "image" => Err(AppError::BadRequest("invalid message payload".into())),
+        "text" | "image" => Err(AppError::BadRequest("invalid message payload".into())),
         _ => Err(AppError::BadRequest("invalid message type".into())),
     }
 }

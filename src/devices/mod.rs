@@ -1,6 +1,6 @@
 use axum::{
     Router,
-    routing::{delete, get, patch, post},
+    routing::{delete, get, post},
 };
 
 use crate::state::AppState;
@@ -13,7 +13,10 @@ pub(crate) use handlers::activate_device;
 pub fn routes() -> Router<AppState> {
     Router::new()
         .route("/devices", post(handlers::create_device))
-        .route("/devices/{device_id}", patch(handlers::update_device))
+        .route(
+            "/devices/{device_id}",
+            get(handlers::device_status).patch(handlers::update_device),
+        )
         .route(
             "/devices/{device_id}/heartbeat",
             post(handlers::heartbeat_device),

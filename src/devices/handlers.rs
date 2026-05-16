@@ -1,13 +1,15 @@
 use axum::{
     Json,
     extract::{Path, State},
+    http::{HeaderMap, header},
 };
+use jsonwebtoken::{DecodingKey, Validation, decode};
 use serde_json::{Value, json};
 use sqlx::Row;
 use uuid::Uuid;
 
 use crate::{
-    auth::{AuthUser, require_adult},
+    auth::{AuthUser, Claims, require_adult},
     error::{AppError, AppResult},
     realtime::emit_tx,
     state::AppState,
@@ -179,6 +181,44 @@ pub(super) async fn heartbeat_device(
         .execute(&state.pool)
         .await?;
     Ok(Json(json!({ "ok": true })))
+}
+
+pub(super) async fn device_status(
+    State(state): State<AppState>,
+    Path(device_id): Path<Uuid>,
+    headers: HeaderMap,
+) -> AppResult<Json<Value>> {
+    let token = headers
+        .get(header::AUTHORIZATION)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.strip_prefix("Bearer "))
+        .ok_or(AppError::Unauthorized)?;
+    let claims = decode::<Claims>(
+        token,
+        &DecodingKey::from_secret(state.config.jwt_secret.as_bytes()),
+        &Validation::default(),
+    )
+    .map_err(|_| AppError::Unauthorized)?
+    .claims;
+    if claims.device_id != Some(device_id) {
+        return Err(AppError::Forbidden);
+    }
+
+    let row = sqlx::query(
+        "SELECT approved, active, deactivation_reason FROM devices WHERE id = ? AND user_id = ?",
+    )
+    .bind(device_id)
+    .bind(claims.user_id)
+    .fetch_optional(&state.pool)
+    .await?
+    .ok_or(AppError::NotFound("device not found".into()))?;
+
+    Ok(Json(json!({
+        "device_id": device_id,
+        "approved": row.try_get::<bool, _>("approved")?,
+        "active": row.try_get::<bool, _>("active")?,
+        "reason": row.try_get::<Option<String>, _>("deactivation_reason")?,
+    })))
 }
 
 pub(super) async fn pending_devices(
