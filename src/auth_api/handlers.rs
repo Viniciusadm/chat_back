@@ -26,6 +26,18 @@ pub(super) async fn register(
         ));
     }
 
+    let email = req.email.trim().to_lowercase();
+    let email_exists = sqlx::query_scalar::<_, i64>(
+        "SELECT 1 FROM users WHERE lower(email) = lower(?) AND deleted_at IS NULL LIMIT 1",
+    )
+    .bind(&email)
+    .fetch_optional(&state.pool)
+    .await?
+    .is_some();
+    if email_exists {
+        return Err(AppError::Conflict("email already registered".into()));
+    }
+
     let mut tx = state.pool.begin().await?;
     let tenant_id = Uuid::new_v4();
     sqlx::query("INSERT INTO tenants (id, name) VALUES (?, ?)")
@@ -53,11 +65,17 @@ pub(super) async fn register(
     .bind(user_id)
     .bind(member_id)
     .bind(tenant_id)
-    .bind(req.email.trim().to_lowercase())
+    .bind(&email)
     .bind(password_hash)
     .bind(req.name.trim())
     .execute(&mut *tx)
-    .await?;
+    .await
+    .map_err(|error| match error {
+        sqlx::Error::Database(db_error) if db_error.code().as_deref() == Some("1062") => {
+            AppError::Conflict("email already registered".into())
+        }
+        other => AppError::Database(other),
+    })?;
 
     sqlx::query("UPDATE tenants SET owner_user_id = ? WHERE id = ?")
         .bind(user_id)
@@ -88,7 +106,7 @@ pub(super) async fn register(
             device_id: Some(device_id),
             role: Role::Adult,
         },
-        Some(req.email.trim().to_lowercase()),
+        Some(email),
         req.name,
     )
     .await
@@ -110,7 +128,9 @@ pub(super) async fn login(
     .await?
     .ok_or(AppError::Unauthorized)?;
 
-    let password_hash: String = row.try_get("password_hash")?;
+    let Some(password_hash) = row.try_get::<Option<String>, _>("password_hash")? else {
+        return Err(AppError::Unauthorized);
+    };
     if !verify_password(&req.password, &password_hash)? {
         return Err(AppError::Unauthorized);
     }
