@@ -39,28 +39,45 @@ pub(crate) async fn activate_device(
         .await?;
     }
 
-    sqlx::query(
+    let result = sqlx::query(
         r#"
-        INSERT INTO devices (id, tenant_id, user_id, approved, active, push_token, public_key, session_at, last_active_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, now(), now())
-        ON DUPLICATE KEY UPDATE
-            push_token = COALESCE(VALUES(push_token), devices.push_token),
-            public_key = COALESCE(devices.public_key, VALUES(public_key)),
+        UPDATE devices SET
+            push_token = COALESCE(?, push_token),
+            public_key = COALESCE(public_key, ?),
             session_at = now(),
             last_active_at = now(),
-            approved = devices.approved OR VALUES(approved),
-            active = CASE WHEN devices.approved OR VALUES(approved) THEN TRUE ELSE devices.active END,
+            approved = approved OR ?,
+            active = CASE WHEN approved OR ? THEN TRUE ELSE active END,
             deactivation_reason = NULL
+        WHERE id = ? AND user_id = ?
         "#,
     )
-    .bind(device_id)
-    .bind(tenant_id)
-    .bind(user_id)
+    .bind(push_token.as_deref())
+    .bind(public_key.as_deref())
     .bind(approved)
-    .bind(push_token)
-    .bind(public_key)
+    .bind(approved)
+    .bind(device_id)
+    .bind(user_id)
     .execute(&mut **tx)
     .await?;
+
+    if result.rows_affected() == 0 {
+        sqlx::query(
+            r#"
+            INSERT INTO devices (id, tenant_id, user_id, approved, active, push_token, public_key, session_at, last_active_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, now(), now())
+            "#,
+        )
+        .bind(device_id)
+        .bind(tenant_id)
+        .bind(user_id)
+        .bind(approved)
+        .bind(approved)
+        .bind(push_token)
+        .bind(public_key)
+        .execute(&mut **tx)
+        .await?;
+    }
 
     Ok(())
 }
@@ -94,23 +111,37 @@ pub(super) async fn create_device(
 ) -> AppResult<Json<Value>> {
     let mut tx = state.pool.begin().await?;
     enforce_public_key_immutability(&mut tx, req.device_id, req.public_key.as_deref()).await?;
-    sqlx::query(
+    let result = sqlx::query(
         r#"
-        INSERT INTO devices (id, tenant_id, user_id, approved, active, push_token, public_key)
-        VALUES (?, ?, ?, FALSE, FALSE, ?, ?)
-        ON DUPLICATE KEY UPDATE
-            push_token = COALESCE(VALUES(push_token), devices.push_token),
-            public_key = COALESCE(devices.public_key, VALUES(public_key)),
+        UPDATE devices SET
+            push_token = COALESCE(?, push_token),
+            public_key = COALESCE(public_key, ?),
             last_active_at = now()
+        WHERE id = ? AND user_id = ?
         "#,
     )
+    .bind(req.push_token.as_deref())
+    .bind(req.public_key.as_deref())
     .bind(req.device_id)
-    .bind(auth.tenant_id)
     .bind(auth.user_id)
-    .bind(req.push_token)
-    .bind(req.public_key)
     .execute(&mut *tx)
     .await?;
+
+    if result.rows_affected() == 0 {
+        sqlx::query(
+            r#"
+            INSERT INTO devices (id, tenant_id, user_id, approved, active, push_token, public_key)
+            VALUES (?, ?, ?, FALSE, FALSE, ?, ?)
+            "#,
+        )
+        .bind(req.device_id)
+        .bind(auth.tenant_id)
+        .bind(auth.user_id)
+        .bind(req.push_token)
+        .bind(req.public_key)
+        .execute(&mut *tx)
+        .await?;
+    }
     emit_tx(
         &mut tx,
         &state.hub,
