@@ -32,4 +32,12 @@ pub fn routes() -> Router<AppState> {
             "/devices/{device_id}/key-shares/{chat_id}",
             put(handlers::put_key_share),
         )
+        .route(
+            "/chats/{chat_id}/key-recipients",
+            get(handlers::list_chat_key_recipients),
+        )
+        .route(
+            "/chats/{chat_id}/devices/{device_id}/key-shares",
+            put(handlers::put_chat_key_share),
+        )
 }

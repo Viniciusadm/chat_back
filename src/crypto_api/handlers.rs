@@ -8,6 +8,7 @@ use uuid::Uuid;
 use crate::{
     auth::{AuthUser, Role, assert_chat_participant, require_adult},
     error::{AppError, AppResult},
+    realtime::emit,
     state::AppState,
     utils::{json_rows, row_to_json},
 };
@@ -112,6 +113,33 @@ pub(super) async fn list_key_shares(
     Ok(Json(json_rows(rows)))
 }
 
+pub(super) async fn list_chat_key_recipients(
+    State(state): State<AppState>,
+    auth: AuthUser,
+    Path(chat_id): Path<Uuid>,
+) -> AppResult<Json<Value>> {
+    assert_chat_participant(&state.pool, chat_id, auth.member_id, auth.tenant_id).await?;
+    let rows = sqlx::query(
+        r#"
+        SELECT d.id, d.user_id, d.public_key, d.approved, d.active, d.created_at, u.member_id
+        FROM chat_participants cp
+        JOIN users u ON u.member_id = cp.member_id AND u.tenant_id = ?
+        JOIN devices d ON d.user_id = u.id AND d.tenant_id = ?
+        WHERE cp.chat_id = ?
+          AND d.approved = true
+          AND d.active = true
+          AND d.public_key IS NOT NULL
+        ORDER BY d.created_at DESC
+        "#,
+    )
+    .bind(auth.tenant_id)
+    .bind(auth.tenant_id)
+    .bind(chat_id)
+    .fetch_all(&state.pool)
+    .await?;
+    Ok(Json(json_rows(rows)))
+}
+
 pub(super) async fn put_key_share(
     State(state): State<AppState>,
     auth: AuthUser,
@@ -147,6 +175,70 @@ pub(super) async fn put_key_share(
     .bind(req.ciphertext)
     .bind(auth.member_id)
     .execute(&state.pool)
+    .await?;
+    Ok(Json(json!({ "ok": true })))
+}
+
+pub(super) async fn put_chat_key_share(
+    State(state): State<AppState>,
+    auth: AuthUser,
+    Path((chat_id, device_id)): Path<(Uuid, Uuid)>,
+    Json(req): Json<KeyShareRequest>,
+) -> AppResult<Json<Value>> {
+    assert_chat_participant(&state.pool, chat_id, auth.member_id, auth.tenant_id).await?;
+    let device_allowed = sqlx::query(
+        r#"
+        SELECT 1
+        FROM devices d
+        JOIN users u ON u.id = d.user_id
+        JOIN chat_participants cp ON cp.member_id = u.member_id
+        WHERE d.id = ?
+          AND d.tenant_id = ?
+          AND d.approved = true
+          AND d.active = true
+          AND cp.chat_id = ?
+        "#,
+    )
+    .bind(device_id)
+    .bind(auth.tenant_id)
+    .bind(chat_id)
+    .fetch_optional(&state.pool)
+    .await?
+    .is_some();
+    if !device_allowed {
+        return Err(AppError::NotFound("device not found".into()));
+    }
+
+    sqlx::query(
+        r#"
+        INSERT INTO key_shares (device_id, chat_id, ephemeral_public_key, iv, ciphertext, wrapped_by_member_id)
+        VALUES (?, ?, ?, ?, ?, ?)
+        ON DUPLICATE KEY UPDATE
+            ephemeral_public_key = VALUES(ephemeral_public_key),
+            iv = VALUES(iv),
+            ciphertext = VALUES(ciphertext),
+            wrapped_by_member_id = VALUES(wrapped_by_member_id),
+            created_at = now()
+        "#,
+    )
+    .bind(device_id)
+    .bind(chat_id)
+    .bind(req.ephemeral_public_key)
+    .bind(req.iv)
+    .bind(req.ciphertext)
+    .bind(auth.member_id)
+    .execute(&state.pool)
+    .await?;
+
+    emit(
+        &state.pool,
+        &state.hub,
+        auth.tenant_id,
+        "key_share.updated",
+        Some(chat_id),
+        Some(device_id),
+        json!({ "device_id": device_id }),
+    )
     .await?;
     Ok(Json(json!({ "ok": true })))
 }
