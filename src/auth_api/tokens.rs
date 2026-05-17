@@ -18,7 +18,7 @@ pub(super) async fn issue_tokens(
 ) -> AppResult<Json<TokenResponse>> {
     let access_token = encode_access_token(state, &auth)?;
     let refresh_token = Uuid::new_v4().to_string();
-    let expires_at = Utc::now() + Duration::days(state.config.refresh_token_ttl_days);
+    let expires_at = (Utc::now() + Duration::days(state.config.refresh_token_ttl_days)).naive_utc();
 
     sqlx::query(
         "INSERT INTO refresh_tokens (user_id, device_id, token_hash, expires_at) VALUES (?, ?, ?, ?)",
@@ -28,7 +28,11 @@ pub(super) async fn issue_tokens(
     .bind(hash_refresh_token(&refresh_token))
     .bind(expires_at)
     .execute(&state.pool)
-    .await?;
+    .await
+    .map_err(|error| {
+        tracing::error!(?error, user_id = %auth.user_id, "failed to persist refresh token");
+        error
+    })?;
 
     Ok(Json(TokenResponse {
         access_token,
