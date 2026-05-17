@@ -213,6 +213,12 @@ pub(super) async fn upload_message_audio(
             field,
         )
         .await?;
+    tracing::debug!(
+        message_id = %message_id,
+        storage_path = %saved.storage_path,
+        public_url = %saved.public_url,
+        "saved message audio"
+    );
 
     let mut tx = state.pool.begin().await?;
     sqlx::query(

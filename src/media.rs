@@ -44,6 +44,7 @@ impl MediaKind {
                     && matches!(
                         lc.as_str(),
                         "audio/m4a"
+                            | "audio/x-m4a"
                             | "audio/mp4"
                             | "audio/aac"
                             | "audio/mpeg"
