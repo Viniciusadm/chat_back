@@ -21,6 +21,8 @@ pub(crate) fn row_to_json(row: sqlx::mysql::MySqlRow) -> Value {
             json!(v)
         } else if let Ok(v) = row.try_get::<i64, _>(name) {
             json!(v)
+        } else if let Ok(v) = row.try_get::<f64, _>(name) {
+            json!(v)
         } else if let Ok(v) = row.try_get::<DateTime<Utc>, _>(name) {
             json!(v)
         } else if let Ok(v) = row.try_get::<Value, _>(name) {
@@ -32,6 +34,8 @@ pub(crate) fn row_to_json(row: sqlx::mysql::MySqlRow) -> Value {
         } else if let Ok(v) = row.try_get::<Option<i32>, _>(name) {
             json!(v)
         } else if let Ok(v) = row.try_get::<Option<i64>, _>(name) {
+            json!(v)
+        } else if let Ok(v) = row.try_get::<Option<f64>, _>(name) {
             json!(v)
         } else if let Ok(v) = row.try_get::<Option<DateTime<Utc>>, _>(name) {
             json!(v)

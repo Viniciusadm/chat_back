@@ -46,12 +46,13 @@ pub(super) async fn insert_media_file(
     sqlx::query(
         r#"
         INSERT INTO media_files (
-            tenant_id, owner_member_id, chat_id, message_id, kind,
+            id, tenant_id, owner_member_id, chat_id, message_id, kind,
             storage_path, public_url, content_type, size_bytes, width, height
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         "#,
     )
+    .bind(Uuid::new_v4())
     .bind(tenant_id)
     .bind(owner_member_id)
     .bind(chat_id)

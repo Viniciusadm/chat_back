@@ -17,12 +17,14 @@ pub(super) async fn issue_tokens(
     name: String,
 ) -> AppResult<Json<TokenResponse>> {
     let access_token = encode_access_token(state, &auth)?;
+    let refresh_token_id = Uuid::new_v4();
     let refresh_token = Uuid::new_v4().to_string();
     let expires_at = (Utc::now() + Duration::days(state.config.refresh_token_ttl_days)).naive_utc();
 
     sqlx::query(
-        "INSERT INTO refresh_tokens (user_id, device_id, token_hash, expires_at) VALUES (?, ?, ?, ?)",
+        "INSERT INTO refresh_tokens (id, user_id, device_id, token_hash, expires_at) VALUES (?, ?, ?, ?, ?)",
     )
+    .bind(refresh_token_id)
     .bind(auth.user_id)
     .bind(auth.device_id)
     .bind(hash_refresh_token(&refresh_token))

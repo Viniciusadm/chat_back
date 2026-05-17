@@ -90,7 +90,9 @@ async fn enrich_chat(
     let mut unread_by = serde_json::Map::new();
     for row in read_rows {
         let member_id: Uuid = row.try_get("member_id")?;
-        if let Ok(Some(read_at)) = row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("read_up_to") {
+        if let Ok(Some(read_at)) =
+            row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("read_up_to")
+        {
             read_up_to.insert(member_id.to_string(), json!(read_at));
         }
         let unread_count: i32 = row.try_get("unread_count")?;

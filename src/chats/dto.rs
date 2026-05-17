@@ -31,7 +31,7 @@ pub(super) struct MessageRequest {
     pub iv: Option<String>,
     pub enc_version: Option<i32>,
     pub audio_url: Option<String>,
-    pub audio_duration: Option<i32>,
+    pub audio_duration: Option<f64>,
     pub image_url: Option<String>,
     pub thumbnail_url: Option<String>,
     pub image_width: Option<i32>,
