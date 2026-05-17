@@ -96,10 +96,10 @@ impl ExpoPush {
         }
 
         let mut data = serde_json::Map::new();
-        data.insert("chat_id".into(), json!(chat_id));
-        data.insert("tenant_id".into(), json!(tenant_id));
-        data.insert("message_id".into(), json!(message_id));
-        data.insert("sender_id".into(), json!(sender_member_id));
+        data.insert("chatId".into(), json!(chat_id));
+        data.insert("tenantId".into(), json!(tenant_id));
+        data.insert("messageId".into(), json!(message_id));
+        data.insert("senderId".into(), json!(sender_member_id));
         data.insert("type".into(), json!(message_kind));
         if message_kind == "text" {
             if let (Some(ct), Some(iv)) = (ciphertext.as_ref(), iv.as_ref()) {
