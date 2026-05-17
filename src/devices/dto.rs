@@ -7,3 +7,8 @@ pub(super) struct DeviceRequest {
     pub push_token: Option<String>,
     pub public_key: Option<String>,
 }
+
+#[derive(Deserialize)]
+pub(super) struct KeyRecipientQuery {
+    pub member_ids: Option<String>,
+}

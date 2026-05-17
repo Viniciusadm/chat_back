@@ -23,6 +23,10 @@ pub fn routes() -> Router<AppState> {
         )
         .route("/admin/devices/pending", get(handlers::pending_devices))
         .route(
+            "/admin/devices/key-recipients",
+            get(handlers::key_recipient_devices),
+        )
+        .route(
             "/admin/devices/{device_id}/approve",
             post(handlers::approve_device),
         )

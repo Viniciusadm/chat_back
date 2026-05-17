@@ -1,6 +1,6 @@
 use axum::{
     Json,
-    extract::{Path, State},
+    extract::{Path, Query, State},
     http::{HeaderMap, header},
 };
 use jsonwebtoken::{DecodingKey, Validation, decode};
@@ -16,7 +16,7 @@ use crate::{
     utils::json_rows,
 };
 
-use super::dto::DeviceRequest;
+use super::dto::{DeviceRequest, KeyRecipientQuery};
 
 pub(crate) async fn activate_device(
     tx: &mut sqlx::Transaction<'_, sqlx::MySql>,
@@ -270,6 +270,48 @@ pub(super) async fn pending_devices(
     .fetch_all(&state.pool)
     .await?;
     Ok(Json(json_rows(rows)))
+}
+
+pub(super) async fn key_recipient_devices(
+    State(state): State<AppState>,
+    auth: AuthUser,
+    Query(query): Query<KeyRecipientQuery>,
+) -> AppResult<Json<Value>> {
+    require_adult(&auth)?;
+    let member_ids = query
+        .member_ids
+        .unwrap_or_default()
+        .split(',')
+        .filter_map(|value| Uuid::parse_str(value.trim()).ok())
+        .collect::<std::collections::HashSet<_>>();
+    if member_ids.is_empty() {
+        return Ok(Json(Value::Array(Vec::new())));
+    }
+
+    let rows = sqlx::query(
+        r#"
+        SELECT d.id, d.user_id, d.public_key, d.approved, d.active, d.created_at, u.member_id
+        FROM devices d
+        JOIN users u ON u.id = d.user_id
+        WHERE d.tenant_id = ?
+          AND d.approved = true
+          AND d.public_key IS NOT NULL
+        ORDER BY d.created_at DESC
+        "#,
+    )
+    .bind(auth.tenant_id)
+    .fetch_all(&state.pool)
+    .await?;
+
+    let filtered = rows
+        .into_iter()
+        .filter(|row| {
+            row.try_get::<Uuid, _>("member_id")
+                .map(|id| member_ids.contains(&id))
+                .unwrap_or(false)
+        })
+        .collect();
+    Ok(Json(json_rows(filtered)))
 }
 
 pub(super) async fn approve_device(
