@@ -27,35 +27,52 @@ pub(super) async fn register(
     }
 
     let email = req.email.trim().to_lowercase();
+    tracing::debug!(email = %email, "register: checking existing email");
     let email_exists = sqlx::query_scalar::<_, i64>(
-        "SELECT 1 FROM users WHERE lower(email) = lower(?) AND deleted_at IS NULL LIMIT 1",
+        "SELECT 1 FROM users WHERE email = ? AND deleted_at IS NULL LIMIT 1",
     )
     .bind(&email)
     .fetch_optional(&state.pool)
-    .await?
+    .await
+    .map_err(|error| {
+        tracing::error!(?error, email = %email, "register: failed to check existing email");
+        error
+    })?
     .is_some();
     if email_exists {
         return Err(AppError::Conflict("email already registered".into()));
     }
 
+    tracing::debug!(email = %email, "register: starting transaction");
     let mut tx = state.pool.begin().await?;
     let tenant_id = Uuid::new_v4();
+    tracing::debug!(%tenant_id, email = %email, "register: inserting tenant");
     sqlx::query("INSERT INTO tenants (id, name) VALUES (?, ?)")
         .bind(tenant_id)
         .bind(format!("Família {}", req.name.trim()))
         .execute(&mut *tx)
-        .await?;
+        .await
+        .map_err(|error| {
+            tracing::error!(?error, %tenant_id, email = %email, "register: failed to insert tenant");
+            error
+        })?;
 
     let member_id = Uuid::new_v4();
+    tracing::debug!(%tenant_id, %member_id, email = %email, "register: inserting member");
     sqlx::query("INSERT INTO members (id, tenant_id, name, role) VALUES (?, ?, ?, 'adult')")
         .bind(member_id)
         .bind(tenant_id)
         .bind(req.name.trim())
         .execute(&mut *tx)
-        .await?;
+        .await
+        .map_err(|error| {
+            tracing::error!(?error, %tenant_id, %member_id, email = %email, "register: failed to insert member");
+            error
+        })?;
 
     let password_hash = hash_password(&req.password)?;
     let user_id = Uuid::new_v4();
+    tracing::debug!(%tenant_id, %member_id, %user_id, email = %email, "register: inserting user");
     sqlx::query(
         r#"
         INSERT INTO users (id, member_id, tenant_id, email, password_hash, name, role)
@@ -77,13 +94,19 @@ pub(super) async fn register(
         other => AppError::Database(other),
     })?;
 
+    tracing::debug!(%tenant_id, %user_id, email = %email, "register: updating tenant owner");
     sqlx::query("UPDATE tenants SET owner_user_id = ? WHERE id = ?")
         .bind(user_id)
         .bind(tenant_id)
         .execute(&mut *tx)
-        .await?;
+        .await
+        .map_err(|error| {
+            tracing::error!(?error, %tenant_id, %user_id, email = %email, "register: failed to update tenant owner");
+            error
+        })?;
 
     let device_id = req.device_id.unwrap_or_else(Uuid::new_v4);
+    tracing::debug!(%tenant_id, %user_id, %device_id, email = %email, "register: activating device");
     activate_device(
         &mut tx,
         tenant_id,
@@ -93,10 +116,16 @@ pub(super) async fn register(
         req.push_token,
         req.public_key,
     )
-    .await?;
+    .await
+    .map_err(|error| {
+        tracing::error!(?error, %tenant_id, %user_id, %device_id, email = %email, "register: failed to activate device");
+        error
+    })?;
 
+    tracing::debug!(%tenant_id, %user_id, email = %email, "register: committing transaction");
     tx.commit().await?;
 
+    tracing::debug!(%tenant_id, %user_id, email = %email, "register: issuing tokens");
     issue_tokens(
         &state,
         AuthUser {
@@ -116,14 +145,15 @@ pub(super) async fn login(
     State(state): State<AppState>,
     Json(req): Json<LoginRequest>,
 ) -> AppResult<Json<TokenResponse>> {
+    let email = req.email.trim().to_lowercase();
     let row = sqlx::query(
         r#"
         SELECT id, member_id, tenant_id, password_hash, name, role AS role, email
         FROM users
-        WHERE lower(email) = lower(?) AND deleted_at IS NULL
+        WHERE email = ? AND deleted_at IS NULL
         "#,
     )
-    .bind(req.email.trim())
+    .bind(&email)
     .fetch_optional(&state.pool)
     .await?
     .ok_or(AppError::Unauthorized)?;
